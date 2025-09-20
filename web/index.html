@@ -5,15 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>auto_trader_rs – Dashboard</title>
     <style>
+        :root { color-scheme: light dark; }
         body { font-family: system-ui, sans-serif; margin: 24px; background:#f5f5f7; }
         .card { background:#fff; border:1px solid #ddd; border-radius:10px; padding:16px; margin-bottom:16px; }
+        .row { display:flex; gap:12px; align-items:center; }
+        .muted { color:#666; font-size:12px; }
         table { width:100%; border-collapse: collapse; }
         th, td { padding:8px 10px; border-top:1px solid #eee; text-align:right; }
         th:first-child, td:first-child { text-align:left; }
+        .banner { padding:10px 12px; border-radius:8px; margin-bottom:12px; }
+        .error { background:#ffe5e5; color:#a40000; border:1px solid #ffc2c2; }
+        .hidden { display:none; }
+        .pos { color:#007700; }
+        .neg { color:#b00020; }
+        button { padding:8px 12px; border-radius:8px; border:1px solid #ccc; background:#fff; cursor:pointer; }
     </style>
 </head>
 <body>
 <h1>auto_trader_rs – ローカルダッシュボード</h1>
+
+<div id="err" class="banner error hidden"></div>
+
+<div class="row" style="margin-bottom:12px;">
+    <button id="reload">更新</button>
+    <span id="ts" class="muted"></span>
+</div>
 
 <div class="card" id="wallet">
     <h2>残高</h2>
@@ -33,37 +49,71 @@
 </div>
 
 <script defer>
+    const fmt2 = new Intl.NumberFormat('ja-JP', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmt0 = new Intl.NumberFormat('ja-JP');
+
     const num = v => (typeof v === 'number' ? v : Number(v ?? 0));
     const qtyOf = p => Math.round(Math.max(p.LeavesQty ?? 0, p.HoldQty ?? 0));
 
-    async function load() {
-        // 残高
-        const w = await fetch('/api/wallet').then(r => r.json());
-        document.getElementById('wallet').innerHTML = `
-        <h2>残高</h2>
-        <div>現物(国内)：${num(w.StockAccountWallet).toFixed(2)}</div>
-        <div>信用(Acb)：${num(w.AcbStockAccountWallet).toFixed(2)}</div>
-        <div>信用(AuBy)：${num(w.AuByStockAccountWallet).toFixed(2)}</div>
-      `;
+    const showErr = (msg) => {
+        const el = document.getElementById('err');
+        el.textContent = msg;
+        el.classList.remove('hidden');
+        setTimeout(() => el.classList.add('hidden'), 6000);
+    };
 
-        // 建玉
-        const ps = await fetch('/api/positions').then(r => r.json());
-        const tbody = document.querySelector('#positions tbody');
-        tbody.innerHTML = '';
-        ps.forEach(p => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-          <td style="text-align:left;">${p.SymbolName ?? '-'}</td>
-          <td>${p.Symbol ?? '-'}</td>
-          <td>${qtyOf(p)}</td>
-          <td>${num(p.Price).toFixed(2)}</td>
-          <td>${num(p.ProfitLoss).toFixed(2)}</td>
+    const setTS = () => {
+        const el = document.getElementById('ts');
+        el.textContent = `最終更新: ${new Date().toLocaleString('ja-JP')}`;
+    };
+
+    async function load() {
+        try {
+            // 残高
+            const wRes = await fetch('/api/wallet');
+            if (!wRes.ok) throw new Error(`/api/wallet ${wRes.status}`);
+            const w = await wRes.json();
+
+            document.getElementById('wallet').innerHTML = `
+          <h2>残高</h2>
+          <div>現物(国内)：${fmt2.format(num(w.StockAccountWallet ?? w.stock_account_wallet))}</div>
+          <div>信用(Acb)：${fmt2.format(num(w.AcbStockAccountWallet ?? w.acb_stock_account_wallet))}</div>
+          <div>信用(AuBy)：${fmt2.format(num(w.AuByStockAccountWallet ?? w.au_by_stock_account_wallet))}</div>
         `;
-            tbody.appendChild(tr);
-        });
+
+            // 建玉
+            const pRes = await fetch('/api/positions');
+            if (!pRes.ok) throw new Error(`/api/positions ${pRes.status}`);
+            const ps = await pRes.json();
+
+            const tbody = document.querySelector('#positions tbody');
+            tbody.innerHTML = '';
+            ps.forEach(p => {
+                const qty = qtyOf(p);
+                const price = num(p.Price ?? p.price);
+                const pl = num(p.ProfitLoss ?? p.profit_loss);
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+            <td style="text-align:left;">${p.SymbolName ?? '-'}</td>
+            <td>${p.Symbol ?? '-'}</td>
+            <td>${fmt0.format(qty)}</td>
+            <td>${fmt2.format(price)}</td>
+            <td class="${pl > 0 ? 'pos' : pl < 0 ? 'neg' : ''}">${fmt2.format(pl)}</td>
+          `;
+                tbody.appendChild(tr);
+            });
+
+            setTS();
+        } catch (err) {
+            console.error(err);
+            showErr(String(err?.message ?? err));
+        }
     }
 
-    window.addEventListener('DOMContentLoaded', load);
+    window.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('reload').addEventListener('click', load);
+        load();
+    });
 </script>
 </body>
 </html>
